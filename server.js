@@ -4,10 +4,14 @@ const dotenv = require("dotenv");
 dotenv.config();
 
 const app = express();
+
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
+// =========================
+// HEALTH CHECK
+// =========================
 app.get("/", (req, res) => {
   res.json({
     status: "online",
@@ -15,7 +19,9 @@ app.get("/", (req, res) => {
   });
 });
 
+// =========================
 // STK PUSH
+// =========================
 app.post("/stk-push", async (req, res) => {
   try {
     console.log("========== STK PUSH START ==========");
@@ -30,6 +36,7 @@ app.post("/stk-push", async (req, res) => {
       });
     }
 
+    // Check environment variables
     if (!process.env.PAYLOR_BASE_URL) {
       return res.status(500).json({
         success: false,
@@ -107,7 +114,6 @@ app.post("/stk-push", async (req, res) => {
   } catch (error) {
     console.error("========== STK PUSH ERROR ==========");
     console.error(error);
-    console.error("====================================");
 
     return res.status(500).json({
       success: false,
@@ -116,15 +122,9 @@ app.post("/stk-push", async (req, res) => {
   }
 });
 
-// WEBHOOK
-app.post("/webhook", (req, res) => {
-  console.log("Paylor webhook received:", req.body);
-
-  res.json({
-    received: true
-  });
-});
-
+// =========================
+// START SERVER
+// =========================
 app.listen(PORT, () => {
   console.log(`ChatPesa server running on port ${PORT}`);
 });
