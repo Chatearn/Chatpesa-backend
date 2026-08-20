@@ -28,7 +28,7 @@ app.post("/stk-push", async (req, res) => {
     }
 
     const response = await fetch(
-      `${process.env.PAYLOR_API_URL}/api/v1/merchants/payments/stk-push`,
+      `${process.env.PAYLOR_BASE_URL}/api/v1/merchants/payments/stk-push`,
       {
         method: "POST",
         headers: {
@@ -39,6 +39,8 @@ app.post("/stk-push", async (req, res) => {
           phone,
           amount,
           reference,
+          channelId: process.env.PAYLOR_CHANNEL_ID,
+          description: "ChatPesa payment",
           callbackUrl: process.env.PAYLOR_WEBHOOK_URL
         })
       }
@@ -47,6 +49,7 @@ app.post("/stk-push", async (req, res) => {
     const data = await response.json();
 
     res.status(response.status).json(data);
+
   } catch (error) {
     console.error("STK Push error:", error);
 
