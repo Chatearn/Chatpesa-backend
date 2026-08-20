@@ -52,10 +52,13 @@ app.get("/", (req, res) => {
 
 app.post("/stk-push", async (req, res) => {
 
+    console.log("=================================");
+    console.log("CHATPESA STK PUSH REQUEST");
+    console.log("=================================");
+
     try {
 
-        console.log("========== STK PUSH START ==========");
-        console.log("Request received:", req.body);
+        console.log("Request body:", req.body);
 
         const {
             phone,
@@ -69,28 +72,81 @@ app.post("/stk-push", async (req, res) => {
 
         if (!phone || !amount || !reference) {
 
+            console.log(
+                "Missing phone, amount or reference"
+            );
+
             return res.status(400).json({
                 success: false,
-                error: "phone, amount and reference are required"
+                error:
+                    "phone, amount and reference are required"
             });
-
         }
+
+        /* =====================================
+           NORMALIZE PHONE
+        ===================================== */
+
+        let formattedPhone =
+            String(phone)
+                .trim()
+                .replace(/\s+/g, "");
+
+        if (formattedPhone.startsWith("07")) {
+
+            formattedPhone =
+                "254" +
+                formattedPhone.substring(1);
+        }
+
+        if (formattedPhone.startsWith("+254")) {
+
+            formattedPhone =
+                formattedPhone.substring(1);
+        }
+
+        console.log(
+            "Formatted phone:",
+            formattedPhone
+        );
 
         /* =====================================
            VALIDATE PHONE
         ===================================== */
 
-        if (!/^2547\d{8}$/.test(phone)) {
+        if (!/^2547\d{8}$/.test(formattedPhone)) {
+
+            console.log(
+                "Invalid Kenyan phone number"
+            );
 
             return res.status(400).json({
                 success: false,
-                error: "Invalid Kenyan phone number"
+                error:
+                    "Invalid Kenyan phone number"
             });
-
         }
 
         /* =====================================
-           CHECK PAYLOR CONFIGURATION
+           VALIDATE AMOUNT
+        ===================================== */
+
+        const paymentAmount =
+            Number(amount);
+
+        if (
+            !Number.isFinite(paymentAmount) ||
+            paymentAmount <= 0
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                error: "Invalid payment amount"
+            });
+        }
+
+        /* =====================================
+           PAYLOR CONFIGURATION
         ===================================== */
 
         const baseUrl =
@@ -102,84 +158,119 @@ app.post("/stk-push", async (req, res) => {
         const callbackUrl =
             process.env.PAYLOR_WEBHOOK_URL;
 
-        if (!baseUrl) {
+        console.log(
+            "PAYLOR_BASE_URL configured:",
+            !!baseUrl
+        );
 
-            console.error(
-                "PAYLOR_BASE_URL is missing"
-            );
+        console.log(
+            "PAYLOR_API_KEY configured:",
+            !!apiKey
+        );
+
+        console.log(
+            "PAYLOR_WEBHOOK_URL configured:",
+            !!callbackUrl
+        );
+
+        /* =====================================
+           CHECK ENVIRONMENT VARIABLES
+        ===================================== */
+
+        if (!baseUrl) {
 
             return res.status(500).json({
                 success: false,
-                error: "PAYLOR_BASE_URL is missing"
+                error:
+                    "PAYLOR_BASE_URL is missing"
             });
-
         }
 
         if (!apiKey) {
 
-            console.error(
-                "PAYLOR_API_KEY is missing"
-            );
-
             return res.status(500).json({
                 success: false,
-                error: "PAYLOR_API_KEY is missing"
+                error:
+                    "PAYLOR_API_KEY is missing"
             });
-
         }
 
         /* =====================================
-           PAYLOR ENDPOINT
+           PAYLOR URL
         ===================================== */
 
         const url =
             `${baseUrl.replace(/\/$/, "")}` +
             `/api/v1/merchants/payments/stk-push`;
 
-        console.log("Paylor URL:", url);
-        console.log("Phone:", phone);
-        console.log("Amount:", amount);
-        console.log("Reference:", reference);
+        console.log(
+            "Paylor URL:",
+            url
+        );
+
+        console.log(
+            "Payment amount:",
+            paymentAmount
+        );
+
+        console.log(
+            "Reference:",
+            reference
+        );
 
         /* =====================================
            PAYLOAD
         ===================================== */
 
         const payload = {
-            phone: phone,
-            amount: Number(amount),
+            phone: formattedPhone,
+            amount: paymentAmount,
             reference: reference
         };
 
         if (callbackUrl) {
-            payload.callbackUrl = callbackUrl;
+
+            payload.callbackUrl =
+                callbackUrl;
         }
 
         console.log(
-            "Sending request to Paylor..."
+            "Payment payload:",
+            payload
         );
 
         /* =====================================
-           SEND REQUEST
+           SEND STK REQUEST
         ===================================== */
 
-        const response = await fetch(url, {
-            method: "POST",
+        console.log(
+            "Sending STK request to Paylor..."
+        );
 
-            headers: {
-                "Authorization":
-                    `Bearer ${apiKey}`,
+        const response =
+            await fetch(url, {
 
-                "Content-Type":
-                    "application/json",
+                method: "POST",
 
-                "Accept":
-                    "application/json"
-            },
+                headers: {
 
-            body:
-                JSON.stringify(payload)
-        });
+                    "Authorization":
+                        `Bearer ${apiKey}`,
+
+                    "Content-Type":
+                        "application/json",
+
+                    "Accept":
+                        "application/json"
+                },
+
+                body:
+                    JSON.stringify(payload)
+            });
+
+        /* =====================================
+           PAYLOR RESPONSE
+        ===================================== */
 
         console.log(
             "Paylor HTTP status:",
@@ -190,12 +281,12 @@ app.post("/stk-push", async (req, res) => {
             await response.text();
 
         console.log(
-            "Paylor response:",
+            "Paylor FULL RESPONSE:",
             responseText
         );
 
         /* =====================================
-           PARSE RESPONSE
+           PARSE PAYLOR RESPONSE
         ===================================== */
 
         let paylorData;
@@ -205,66 +296,94 @@ app.post("/stk-push", async (req, res) => {
             paylorData =
                 JSON.parse(responseText);
 
-        } catch {
+        } catch (error) {
 
             paylorData = {
-                rawResponse: responseText
+                rawResponse:
+                    responseText
             };
-
         }
 
-        console.log(
-            "========== STK PUSH END =========="
-        );
-
         /* =====================================
-           RETURN TO FRONTEND
+           SUCCESS
         ===================================== */
 
         if (response.ok) {
+
+            console.log(
+                "STK REQUEST ACCEPTED BY PAYLOR"
+            );
 
             return res.status(200).json({
 
                 success: true,
 
-                reference: reference,
+                reference:
+                    reference,
+
+                message:
+                    "STK Push request accepted",
 
                 paylorStatus:
                     response.status,
 
                 paylorResponse:
                     paylorData
-
             });
-
         }
 
-        return res.status(response.status).json({
+        /* =====================================
+           PAYLOR ERROR
+        ===================================== */
+
+        console.log(
+            "PAYLOR REJECTED THE REQUEST"
+        );
+
+        const errorMessage =
+            paylorData.message ||
+            paylorData.error ||
+            paylorData.detail ||
+            "Paylor rejected the payment request.";
+
+        return res.status(502).json({
 
             success: false,
 
-            reference: reference,
+            reference:
+                reference,
+
+            error:
+                errorMessage,
 
             paylorStatus:
                 response.status,
 
-            error:
-                paylorData.message ||
-                paylorData.error ||
-                "Paylor rejected the payment request.",
-
             paylorResponse:
                 paylorData
-
         });
 
     } catch (error) {
 
         console.error(
-            "========== STK PUSH ERROR =========="
+            "================================="
         );
 
         console.error(
+            "CHATPESA STK PUSH ERROR"
+        );
+
+        console.error(
+            "================================="
+        );
+
+        console.error(
+            "Error:",
+            error.message
+        );
+
+        console.error(
+            "Full error:",
             error
         );
 
@@ -275,21 +394,14 @@ app.post("/stk-push", async (req, res) => {
             error:
                 error.message ||
                 "Internal server error"
-
         });
-
     }
-
 });
 
 /* =========================================
    START SERVER
 ========================================= */
 
-app.listen(PORT, "0.0.0.0", () => {
-
-    console.log(
-        `ChatPesa server running on port ${PORT}`
-    );
-
-});
+app.listen(
+    PORT,
+    "0.0.
