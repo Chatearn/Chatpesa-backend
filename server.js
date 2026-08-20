@@ -9,10 +9,20 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
+// Home / health check
 app.get("/", (req, res) => {
   res.json({
     status: "online",
     service: "ChatPesa API"
+  });
+});
+
+// Paylor webhook
+app.post("/webhook", (req, res) => {
+  console.log("Webhook received:", req.body);
+
+  res.json({
+    received: true
   });
 });
 
