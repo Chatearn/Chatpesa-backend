@@ -36,14 +36,40 @@ const payments = new Map();
 
 
 // =========================================
+// COUNTRY UNLOCK PRICES
+// =========================================
+
+const countryPrices = {
+
+    China: 2,
+
+    Canada: 3,
+
+    Australia: 4,
+
+    UK: 5,
+
+    USA: 6,
+
+    Others: 1
+
+};
+
+
+// =========================================
 // HEALTH CHECK
 // =========================================
 
 app.get("/", (req, res) => {
+
     res.json({
+
         status: "online",
+
         service: "ChatPesa API"
+
     });
+
 });
 
 
@@ -64,39 +90,186 @@ app.post("/stk-push", async (req, res) => {
         const {
             phone,
             amount,
-            reference
+            reference,
+            type,
+            country
         } = req.body;
 
 
+        // =====================================
+        // PHONE CHECK
+        // =====================================
+
         if (!phone) {
+
             return res.status(400).json({
+
                 success: false,
-                error: "Phone number is required."
+
+                error:
+                    "Phone number is required."
+
             });
+
         }
 
 
-        if (!amount) {
-            return res.status(400).json({
-                success: false,
-                error: "Amount is required."
-            });
-        }
-
+        // =====================================
+        // REFERENCE CHECK
+        // =====================================
 
         if (!reference) {
+
             return res.status(400).json({
+
                 success: false,
-                error: "Reference is required."
+
+                error:
+                    "Reference is required."
+
             });
+
         }
 
+
+        // =====================================
+        // DETERMINE PAYMENT TYPE
+        // =====================================
+
+        const paymentType =
+            type || "registration";
+
+
+        // =====================================
+        // REGISTRATION PAYMENT
+        // =====================================
+
+        if (
+            paymentType === "registration"
+        ) {
+
+            /*
+             * Registration fee remains
+             * KSh 1.
+             */
+
+            if (Number(amount) !== 1) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    error:
+                        "Registration payment must be KSh 1."
+
+                });
+
+            }
+
+        }
+
+
+        // =====================================
+        // COUNTRY UNLOCK PAYMENT
+        // =====================================
+
+        else if (
+            paymentType === "country_unlock"
+        ) {
+
+            if (!country) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    error:
+                        "Country is required."
+
+                });
+
+            }
+
+
+            if (
+                !Object.prototype.hasOwnProperty.call(
+                    countryPrices,
+                    country
+                )
+            ) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    error:
+                        "Invalid country."
+
+                });
+
+            }
+
+
+            const correctAmount =
+                countryPrices[country];
+
+
+            /*
+             * IMPORTANT:
+             * The backend determines the
+             * actual country price.
+             */
+
+            if (
+                Number(amount) !==
+                correctAmount
+            ) {
+
+                return res.status(400).json({
+
+                    success: false,
+
+                    error:
+                        `The unlock fee for ${country} is KSh ${correctAmount}.`
+
+                });
+
+            }
+
+        }
+
+
+        // =====================================
+        // UNKNOWN PAYMENT TYPE
+        // =====================================
+
+        else {
+
+            return res.status(400).json({
+
+                success: false,
+
+                error:
+                    "Invalid payment type."
+
+            });
+
+        }
+
+
+        // =====================================
+        // PAYLOR API KEY
+        // =====================================
 
         if (!process.env.PAYLOR_API_KEY) {
 
             return res.status(500).json({
+
                 success: false,
-                error: "Paylor API key is not configured."
+
+                error:
+                    "Paylor API key is not configured."
+
             });
 
         }
@@ -125,11 +298,43 @@ app.post("/stk-push", async (req, res) => {
         // =====================================
 
         payments.set(reference, {
+
             status: "PENDING",
+
             phone: phone,
-            amount: Number(amount),
-            reference: reference
+
+            amount:
+                Number(amount),
+
+            reference:
+                reference,
+
+            type:
+                paymentType,
+
+            country:
+                country || null
+
         });
+
+
+        // =====================================
+        // PAYMENT DESCRIPTION
+        // =====================================
+
+        let description =
+            "ChatPesa registration payment";
+
+
+        if (
+            paymentType ===
+            "country_unlock"
+        ) {
+
+            description =
+                `ChatPesa ${country} country unlock`;
+
+        }
 
 
         // =====================================
@@ -140,12 +345,14 @@ app.post("/stk-push", async (req, res) => {
 
             phone: phone,
 
-            amount: Number(amount),
+            amount:
+                Number(amount),
 
-            reference: reference,
+            reference:
+                reference,
 
             description:
-                "ChatPesa registration payment",
+                description,
 
             callbackUrl:
                 callbackUrl
@@ -153,7 +360,9 @@ app.post("/stk-push", async (req, res) => {
         };
 
 
-        if (process.env.PAYLOR_CHANNEL_ID) {
+        if (
+            process.env.PAYLOR_CHANNEL_ID
+        ) {
 
             paylorData.channelId =
                 process.env.PAYLOR_CHANNEL_ID;
@@ -171,28 +380,33 @@ app.post("/stk-push", async (req, res) => {
         );
 
 
-        const response = await fetch(
-            "https://api.paylorke.com/api/v1/merchants/payments/stk-push",
-            {
-                method: "POST",
+        const response =
+            await fetch(
+                "https://api.paylorke.com/api/v1/merchants/payments/stk-push",
+                {
 
-                headers: {
+                    method: "POST",
 
-                    "Authorization":
-                        `Bearer ${process.env.PAYLOR_API_KEY}`,
+                    headers: {
 
-                    "Content-Type":
-                        "application/json",
+                        "Authorization":
+                            `Bearer ${process.env.PAYLOR_API_KEY}`,
 
-                    "Accept":
-                        "application/json"
+                        "Content-Type":
+                            "application/json",
 
-                },
+                        "Accept":
+                            "application/json"
 
-                body:
-                    JSON.stringify(paylorData)
-            }
-        );
+                    },
+
+                    body:
+                        JSON.stringify(
+                            paylorData
+                        )
+
+                }
+            );
 
 
         const text =
@@ -214,12 +428,16 @@ app.post("/stk-push", async (req, res) => {
 
         try {
 
-            data = JSON.parse(text);
+            data =
+                JSON.parse(text);
 
         } catch {
 
             data = {
-                message: text
+
+                message:
+                    text
+
             };
 
         }
@@ -237,9 +455,17 @@ app.post("/stk-push", async (req, res) => {
 
                 phone: phone,
 
-                amount: Number(amount),
+                amount:
+                    Number(amount),
 
-                reference: reference,
+                reference:
+                    reference,
+
+                type:
+                    paymentType,
+
+                country:
+                    country || null,
 
                 error:
                     data.message ||
@@ -339,7 +565,8 @@ app.post("/paylor-callback", (req, res) => {
 
     try {
 
-        const body = req.body || {};
+        const body =
+            req.body || {};
 
 
         // =====================================
@@ -361,12 +588,14 @@ app.post("/paylor-callback", (req, res) => {
 
         const status =
             String(
+
                 body.status ||
                 body.transaction?.status ||
                 body.data?.status ||
                 body.payment?.status ||
                 body.event ||
                 ""
+
             ).toLowerCase();
 
 
@@ -388,7 +617,9 @@ app.post("/paylor-callback", (req, res) => {
             );
 
             return res.json({
+
                 received: true
+
             });
 
         }
@@ -403,12 +634,14 @@ app.post("/paylor-callback", (req, res) => {
         // =====================================
 
         if (
+
             status === "success" ||
             status === "successful" ||
             status === "completed" ||
             status === "complete" ||
             status === "paid" ||
             status === "payment.success"
+
         ) {
 
             console.log(
@@ -420,11 +653,14 @@ app.post("/paylor-callback", (req, res) => {
 
                 ...existing,
 
-                status: "SUCCESS",
+                status:
+                    "SUCCESS",
 
-                reference: reference,
+                reference:
+                    reference,
 
                 transactionId:
+
                     body.transactionId ||
                     body.transaction?.id ||
                     body.data?.transactionId ||
@@ -447,6 +683,7 @@ app.post("/paylor-callback", (req, res) => {
         // =====================================
 
         else if (
+
             status === "failed" ||
             status === "failure" ||
             status === "cancelled" ||
@@ -454,6 +691,7 @@ app.post("/paylor-callback", (req, res) => {
             status === "rejected" ||
             status === "declined" ||
             status === "payment.failed"
+
         ) {
 
             console.log(
@@ -465,9 +703,11 @@ app.post("/paylor-callback", (req, res) => {
 
                 ...existing,
 
-                status: "FAILED",
+                status:
+                    "FAILED",
 
-                reference: reference,
+                reference:
+                    reference,
 
                 callback:
                     body,
@@ -498,7 +738,8 @@ app.post("/paylor-callback", (req, res) => {
                 status:
                     "CALLBACK_RECEIVED",
 
-                reference: reference,
+                reference:
+                    reference,
 
                 callback:
                     body,
@@ -513,9 +754,11 @@ app.post("/paylor-callback", (req, res) => {
 
         return res.json({
 
-            received: true,
+            received:
+                true,
 
-            reference: reference
+            reference:
+                reference
 
         });
 
@@ -529,7 +772,8 @@ app.post("/paylor-callback", (req, res) => {
 
         return res.status(500).json({
 
-            received: false,
+            received:
+                false,
 
             error:
                 error.message
@@ -561,7 +805,8 @@ app.get(
 
             return res.json({
 
-                success: true,
+                success:
+                    true,
 
                 status:
                     "NOT_FOUND",
@@ -576,7 +821,8 @@ app.get(
 
         return res.json({
 
-            success: true,
+            success:
+                true,
 
             status:
                 payment.status,
@@ -590,9 +836,39 @@ app.get(
             phone:
                 payment.phone,
 
+            type:
+                payment.type ||
+                "registration",
+
+            country:
+                payment.country ||
+                null,
+
             transactionId:
                 payment.transactionId ||
                 null
+
+        });
+
+    }
+);
+
+
+// =========================================
+// COUNTRY PRICES
+// =========================================
+
+app.get(
+    "/country-prices",
+    (req, res) => {
+
+        res.json({
+
+            success:
+                true,
+
+            prices:
+                countryPrices
 
         });
 
