@@ -101,7 +101,7 @@ app.post("/stk-push", async (req, res) => {
         } = req.body;
 
 
-        console.log("CHATPESA DATA:", {
+        console.log("CHATPESA DATA RECEIVED:", {
             phone,
             amount,
             reference,
@@ -137,20 +137,28 @@ app.post("/stk-push", async (req, res) => {
 
 
         /* ---------------------------------------------
+           DETERMINE FINAL PAYMENT AMOUNT
+        --------------------------------------------- */
+
+        let finalAmount = Number(amount);
+
+
+        /* ---------------------------------------------
            REGISTRATION PAYMENT
-           MUST BE KSH 1
+           ALWAYS KSH 1
         --------------------------------------------- */
 
         if (type === "registration") {
 
-            if (Number(amount) !== 1) {
+            finalAmount = 1;
 
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Registration payment must be KSh 1."
-                });
-            }
+            console.log(
+                "CHATPESA: Registration payment detected."
+            );
+
+            console.log(
+                "CHATPESA: Final registration amount = KSh 1"
+            );
         }
 
 
@@ -176,17 +184,35 @@ app.post("/stk-push", async (req, res) => {
                 });
             }
 
-            if (
-                Number(amount) !==
-                Number(countryPrices[country])
-            ) {
+            finalAmount =
+                Number(countryPrices[country]);
 
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Incorrect payment amount for this country."
-                });
-            }
+
+            console.log(
+                "CHATPESA: Country:",
+                country
+            );
+
+            console.log(
+                "CHATPESA: Final country amount:",
+                finalAmount
+            );
+        }
+
+
+        /* ---------------------------------------------
+           FINAL AMOUNT VALIDATION
+        --------------------------------------------- */
+
+        if (
+            !Number.isFinite(finalAmount) ||
+            finalAmount <= 0
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                message: "Invalid payment amount."
+            });
         }
 
 
@@ -213,13 +239,26 @@ app.post("/stk-push", async (req, res) => {
         --------------------------------------------- */
 
         payments.set(reference, {
+
             reference: reference,
+
             phone: phone,
-            amount: Number(amount),
-            type: type || "registration",
-            country: country || null,
-            status: "PENDING",
-            createdAt: Date.now()
+
+            amount: finalAmount,
+
+            type:
+                type ||
+                "registration",
+
+            country:
+                country ||
+                null,
+
+            status:
+                "PENDING",
+
+            createdAt:
+                Date.now()
         });
 
 
@@ -228,13 +267,18 @@ app.post("/stk-push", async (req, res) => {
         --------------------------------------------- */
 
         const paylorBody = {
+
             phone: phone,
-            amount: Number(amount),
+
+            amount: finalAmount,
+
             reference: reference,
+
             description:
                 type === "registration"
                     ? "ChatPesa registration payment"
-                    : "ChatPesa country unlock payment",
+                    : `ChatPesa ${country || ""} unlock payment`,
+
             callbackUrl:
                 `${BACKEND_URL}/paylor-callback`
         };
@@ -253,7 +297,7 @@ app.post("/stk-push", async (req, res) => {
         );
 
         console.log(
-            "CHATPESA: Sending request to Paylor"
+            "CHATPESA: Sending request to Paylor..."
         );
 
         console.log(
@@ -262,6 +306,10 @@ app.post("/stk-push", async (req, res) => {
         );
 
 
+        /* ---------------------------------------------
+           SEND REQUEST TO PAYLOR
+        --------------------------------------------- */
+
         const paylorResponse =
             await fetch(
                 "https://api.paylorke.com/api/v1/merchants/payments/stk-push",
@@ -269,6 +317,7 @@ app.post("/stk-push", async (req, res) => {
                     method: "POST",
 
                     headers: {
+
                         "Content-Type":
                             "application/json",
 
@@ -309,7 +358,7 @@ app.post("/stk-push", async (req, res) => {
             paylorData =
                 JSON.parse(responseText);
 
-        } catch (e) {
+        } catch (error) {
 
             paylorData = {
                 raw: responseText
@@ -323,20 +372,35 @@ app.post("/stk-push", async (req, res) => {
 
         if (!paylorResponse.ok) {
 
-            payments.set(reference, {
-                ...payments.get(reference),
-                status: "FAILED"
-            });
+            payments.set(
+                reference,
+                {
+                    ...payments.get(reference),
+
+                    status:
+                        "FAILED",
+
+                    failureReason:
+                        paylorData.message ||
+                        paylorData.error ||
+                        "Paylor payment request failed."
+                }
+            );
+
 
             return res.status(
                 paylorResponse.status
             ).json({
+
                 success: false,
+
                 message:
                     paylorData.message ||
                     paylorData.error ||
                     "Paylor payment request failed.",
-                data: paylorData
+
+                data:
+                    paylorData
             });
         }
 
@@ -345,15 +409,37 @@ app.post("/stk-push", async (req, res) => {
            PAYMENT ACCEPTED BY PAYLOR
         --------------------------------------------- */
 
-        payments.set(reference, {
-            ...payments.get(reference),
-            transactionId:
-                paylorData.transactionId || null,
-            status:
-                paylorData.status === "COMPLETED"
-                    ? "SUCCESS"
-                    : "PENDING"
-        });
+        const paylorStatus =
+            String(
+                paylorData.status ||
+                "PENDING"
+            ).toUpperCase();
+
+
+        payments.set(
+            reference,
+            {
+
+                ...payments.get(reference),
+
+                transactionId:
+                    paylorData.transactionId ||
+                    null,
+
+                status:
+                    paylorStatus === "COMPLETED"
+                        ? "SUCCESS"
+                        : "PENDING"
+            }
+        );
+
+
+        console.log(
+            "CHATPESA: Payment saved as:",
+            paylorStatus === "COMPLETED"
+                ? "SUCCESS"
+                : "PENDING"
+        );
 
 
         return res.json({
@@ -363,13 +449,16 @@ app.post("/stk-push", async (req, res) => {
             message:
                 "M-PESA payment prompt sent.",
 
-            reference: reference,
+            reference:
+                reference,
 
             transactionId:
-                paylorData.transactionId || null,
+                paylorData.transactionId ||
+                null,
 
             status:
-                paylorData.status || "PENDING"
+                paylorData.status ||
+                "PENDING"
         });
 
 
@@ -429,6 +518,7 @@ app.post("/paylor-callback", (req, res) => {
                     "x-webhook-signature"
                 ];
 
+
             if (!signature) {
 
                 console.error(
@@ -436,7 +526,9 @@ app.post("/paylor-callback", (req, res) => {
                 );
 
                 return res.status(401).json({
+
                     success: false,
+
                     message:
                         "Missing webhook signature."
                 });
@@ -465,13 +557,19 @@ app.post("/paylor-callback", (req, res) => {
                 );
 
                 return res.status(401).json({
+
                     success: false,
+
                     message:
                         "Invalid webhook signature."
                 });
             }
         }
 
+
+        /* ---------------------------------------------
+           GET CALLBACK DATA
+        --------------------------------------------- */
 
         const event =
             req.body?.event;
@@ -482,8 +580,14 @@ app.post("/paylor-callback", (req, res) => {
 
         if (!transaction) {
 
+            console.error(
+                "PAYLOR: Transaction information missing."
+            );
+
             return res.status(400).json({
+
                 success: false,
+
                 message:
                     "Transaction information missing."
             });
@@ -493,6 +597,22 @@ app.post("/paylor-callback", (req, res) => {
         const reference =
             transaction.reference ||
             transaction.internalReference;
+
+
+        if (!reference) {
+
+            console.error(
+                "PAYLOR: Payment reference missing."
+            );
+
+            return res.status(400).json({
+
+                success: false,
+
+                message:
+                    "Payment reference missing."
+            });
+        }
 
 
         const pay =
@@ -505,13 +625,27 @@ app.post("/paylor-callback", (req, res) => {
         );
 
 
+        console.log(
+            "CALLBACK EVENT:",
+            event
+        );
+
+
+        console.log(
+            "CALLBACK TRANSACTION STATUS:",
+            transaction.status
+        );
+
+
         /* ---------------------------------------------
            PAYMENT SUCCESS
         --------------------------------------------- */
 
         if (
             event === "payment.success" ||
-            transaction.status === "COMPLETED"
+            String(
+                transaction.status || ""
+            ).toUpperCase() === "COMPLETED"
         ) {
 
             console.log(
@@ -528,13 +662,16 @@ app.post("/paylor-callback", (req, res) => {
                 payments.set(
                     reference,
                     {
+
                         ...pay,
 
-                        status: "SUCCESS",
+                        status:
+                            "SUCCESS",
 
                         transactionId:
                             transaction.id ||
-                            pay.transactionId,
+                            pay.transactionId ||
+                            null,
 
                         mpesaReceipt:
                             transaction.mpesaReceipt ||
@@ -579,7 +716,9 @@ app.post("/paylor-callback", (req, res) => {
 
 
             return res.json({
+
                 success: true,
+
                 received: true
             });
         }
@@ -591,7 +730,9 @@ app.post("/paylor-callback", (req, res) => {
 
         if (
             event === "payment.failed" ||
-            transaction.status === "FAILED"
+            String(
+                transaction.status || ""
+            ).toUpperCase() === "FAILED"
         ) {
 
             console.log(
@@ -608,12 +749,15 @@ app.post("/paylor-callback", (req, res) => {
                 payments.set(
                     reference,
                     {
+
                         ...pay,
 
-                        status: "FAILED",
+                        status:
+                            "FAILED",
 
                         failureReason:
-                            transaction.metadata
+                            transaction
+                                .metadata
                                 ?.callbackResultDesc ||
                             "Payment failed.",
 
@@ -625,11 +769,17 @@ app.post("/paylor-callback", (req, res) => {
 
 
             return res.json({
+
                 success: true,
+
                 received: true
             });
         }
 
+
+        /* ---------------------------------------------
+           UNKNOWN STATUS
+        --------------------------------------------- */
 
         console.log(
             "CHATPESA: UNKNOWN PAYMENT STATUS"
@@ -637,7 +787,9 @@ app.post("/paylor-callback", (req, res) => {
 
 
         return res.json({
+
             success: true,
+
             received: true
         });
 
@@ -650,7 +802,9 @@ app.post("/paylor-callback", (req, res) => {
         );
 
         return res.status(500).json({
+
             success: false,
+
             message:
                 "Callback processing error."
         });
@@ -669,6 +823,7 @@ app.get(
         const reference =
             req.params.reference;
 
+
         const payment =
             payments.get(reference);
 
@@ -679,7 +834,8 @@ app.get(
 
                 success: false,
 
-                status: "NOT_FOUND",
+                status:
+                    "NOT_FOUND",
 
                 message:
                     "Payment reference not found."
@@ -731,7 +887,4 @@ app.listen(
     () => {
 
         console.log(
-            `ChatPesa server running on port ${PORT}`
-        );
-    }
-);
+            `ChatPesa server running on
