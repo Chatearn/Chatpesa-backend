@@ -887,4 +887,7 @@ app.listen(
     () => {
 
         console.log(
-            `ChatPesa server running on
+            `ChatPesa server running on port ${PORT}`
+        );
+    }
+);
