@@ -138,7 +138,7 @@ app.post("/stk-push", async (req, res) => {
         let finalAmount;
 
         if (type === "registration") {
-            finalAmount = 1;
+            finalAmount = 100;
         } else if (type === "country_unlock") {
             if (!country || !countryPrices[country]) {
                 return res.status(400).json({
