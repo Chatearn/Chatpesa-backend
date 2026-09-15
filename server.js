@@ -6,7 +6,11 @@ const crypto = require("crypto");
 
 const app = express();
 
-app.use(cors());
+app.use(cors({
+    origin: true,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]
+}));
 
 app.use(
     express.json({
@@ -140,6 +144,7 @@ app.post("/stk-push", async (req, res) => {
         if (type === "registration") {
             finalAmount = 100;
         } else if (type === "country_unlock") {
+
             if (!country || !countryPrices[country]) {
                 return res.status(400).json({
                     success: false,
@@ -148,6 +153,7 @@ app.post("/stk-push", async (req, res) => {
             }
 
             finalAmount = countryPrices[country];
+
         } else {
             finalAmount = Number(amount);
         }
@@ -163,7 +169,10 @@ app.post("/stk-push", async (req, res) => {
         }
 
         if (!process.env.PAYLOR_API_KEY) {
-            console.error("PAYLOR_API_KEY is missing");
+
+            console.error(
+                "PAYLOR_API_KEY is missing"
+            );
 
             return res.status(500).json({
                 success: false,
@@ -182,7 +191,7 @@ app.post("/stk-push", async (req, res) => {
         });
 
         /* ================================
-           PAYLOR API URL
+           PAYLOR API
         ================================= */
 
         const PAYLOR_URL =
@@ -195,30 +204,56 @@ app.post("/stk-push", async (req, res) => {
             description:
                 type === "registration"
                     ? "ChatPesa registration payment"
-                    : "ChatPesa " + (country || "country") + " unlock payment",
+                    : "ChatPesa " +
+                      (country || "country") +
+                      " unlock payment",
             callbackUrl:
                 "https://chatpesa-backend.onrender.com/paylor-callback"
         };
+
+        /*
+         * Paylor allows channelId to be omitted.
+         * If you have a specific active channel ID/alias,
+         * put it in Render Environment Variables as:
+         *
+         * PAYLOR_CHANNEL_ID=PAYL-XXXXXX
+         */
 
         if (process.env.PAYLOR_CHANNEL_ID) {
             paylorRequest.channelId =
                 process.env.PAYLOR_CHANNEL_ID;
         }
 
-        console.log("PAYLOR REQUEST:", paylorRequest);
+        console.log(
+            "PAYLOR REQUEST:",
+            paylorRequest
+        );
 
-        const response = await fetch(PAYLOR_URL, {
-            method: "POST",
-            headers: {
-                "Authorization":
-                    "Bearer " + process.env.PAYLOR_API_KEY,
-                "Content-Type": "application/json",
-                "Idempotency-Key": reference
-            },
-            body: JSON.stringify(paylorRequest)
-        });
+        const response = await fetch(
+            PAYLOR_URL,
+            {
+                method: "POST",
 
-        const responseText = await response.text();
+                headers: {
+                    "Authorization":
+                        "Bearer " +
+                        process.env.PAYLOR_API_KEY,
+
+                    "Content-Type":
+                        "application/json",
+
+                    "Idempotency-Key":
+                        reference
+                },
+
+                body: JSON.stringify(
+                    paylorRequest
+                )
+            }
+        );
+
+        const responseText =
+            await response.text();
 
         console.log(
             "PAYLOR HTTP STATUS:",
@@ -230,51 +265,93 @@ app.post("/stk-push", async (req, res) => {
             responseText
         );
 
-        if (!response.ok) {
-            payments.set(reference, {
-                ...payments.get(reference),
-                status: "FAILED",
-                gatewayStatus: response.status,
-                gatewayResponse: responseText
-            });
-
-            return res.status(502).json({
-                success: false,
-                message: "Payment gateway rejected the request",
-                gatewayStatus: response.status
-            });
-        }
-
         let paylorResponse = {};
 
         try {
-            paylorResponse = JSON.parse(responseText);
+            paylorResponse =
+                JSON.parse(responseText);
         } catch (error) {
+
             console.error(
                 "PAYLOR JSON PARSE ERROR:",
                 error.message
             );
         }
 
+        if (!response.ok) {
+
+            payments.set(reference, {
+                ...payments.get(reference),
+
+                status: "FAILED",
+
+                gatewayStatus:
+                    response.status,
+
+                gatewayResponse:
+                    paylorResponse
+            });
+
+            return res.status(502).json({
+                success: false,
+
+                message:
+                    paylorResponse.message ||
+                    paylorResponse.error ||
+                    "Payment gateway rejected the request",
+
+                gatewayStatus:
+                    response.status,
+
+                gatewayResponse:
+                    paylorResponse
+            });
+        }
+
         payments.set(reference, {
             ...payments.get(reference),
-            status: paylorResponse.status || "PENDING",
+
+            status:
+                paylorResponse.status ||
+                "PENDING",
+
             transactionId:
-                paylorResponse.transactionId || null,
-            gatewayResponse: paylorResponse
+                paylorResponse.transactionId ||
+                null,
+
+            gatewayResponse:
+                paylorResponse
         });
+
+        /*
+         * Paylor normally returns:
+         *
+         * {
+         *   transactionId: "...",
+         *   status: "SENT"
+         * }
+         */
 
         return res.json({
             success: true,
-            reference: reference,
+
+            reference:
+                reference,
+
             transactionId:
-                paylorResponse.transactionId || null,
+                paylorResponse.transactionId ||
+                null,
+
             status:
-                paylorResponse.status || "PENDING",
-            message: "M-PESA payment request sent"
+                paylorResponse.status ||
+                "PENDING",
+
+            message:
+                "M-PESA payment request sent"
         });
 
     } catch (error) {
+
         console.error(
             "STK PUSH ERROR:",
             error
@@ -282,7 +359,9 @@ app.post("/stk-push", async (req, res) => {
 
         return res.status(500).json({
             success: false,
-            message: "Unable to initiate payment"
+            message:
+                error.message ||
+                "Unable to initiate payment"
         });
     }
 });
@@ -291,168 +370,238 @@ app.post("/stk-push", async (req, res) => {
    PAYLOR CALLBACK
 ================================ */
 
-app.post("/paylor-callback", (req, res) => {
-    try {
-        console.log(
-            "PAYLOR CALLBACK BODY:",
-            req.body
-        );
+app.post(
+    "/paylor-callback",
+    (req, res) => {
 
-        if (process.env.PAYLOR_WEBHOOK_SECRET) {
-            const signature =
-                req.headers["x-webhook-signature"];
+        try {
 
-            if (!signature) {
-                console.error(
-                    "Missing Paylor webhook signature"
-                );
+            console.log(
+                "PAYLOR CALLBACK BODY:",
+                req.body
+            );
 
-                return res.status(401).json({
+            if (
+                process.env.PAYLOR_WEBHOOK_SECRET
+            ) {
+
+                const signature =
+                    req.headers[
+                        "x-webhook-signature"
+                    ];
+
+                if (!signature) {
+
+                    console.error(
+                        "Missing Paylor webhook signature"
+                    );
+
+                    return res.status(401).json({
+                        success: false,
+                        message:
+                            "Missing webhook signature"
+                    });
+                }
+
+                const expectedSignature =
+                    crypto
+                        .createHmac(
+                            "sha256",
+                            process.env
+                                .PAYLOR_WEBHOOK_SECRET
+                        )
+                        .update(
+                            req.rawBody ||
+                            Buffer.from("")
+                        )
+                        .digest("hex");
+
+                if (
+                    signature !==
+                    expectedSignature
+                ) {
+
+                    console.error(
+                        "Invalid Paylor webhook signature"
+                    );
+
+                    return res.status(401).json({
+                        success: false,
+                        message:
+                            "Invalid webhook signature"
+                    });
+                }
+            }
+
+            const event =
+                req.body?.event;
+
+            const transaction =
+                req.body?.transaction ||
+                {};
+
+            const reference =
+                transaction.reference ||
+                transaction.internalReference;
+
+            const status =
+                String(
+                    transaction.status ||
+                    ""
+                ).toUpperCase();
+
+            console.log(
+                "CALLBACK REFERENCE:",
+                reference
+            );
+
+            console.log(
+                "CALLBACK STATUS:",
+                status || event
+            );
+
+            if (!reference) {
+
+                return res.status(400).json({
                     success: false,
-                    message: "Missing webhook signature"
+                    message:
+                        "Payment reference missing"
                 });
             }
 
-            const expectedSignature =
-                crypto
-                    .createHmac(
-                        "sha256",
-                        process.env.PAYLOR_WEBHOOK_SECRET
-                    )
-                    .update(
-                        req.rawBody ||
-                        Buffer.from("")
-                    )
-                    .digest("hex");
+            if (
+                event ===
+                    "payment.success" ||
+                status === "COMPLETED" ||
+                status === "SUCCESS"
+            ) {
 
-            if (signature !== expectedSignature) {
-                console.error(
-                    "Invalid Paylor webhook signature"
+                const existing =
+                    payments.get(
+                        reference
+                    ) || {};
+
+                payments.set(
+                    reference,
+                    {
+                        ...existing,
+
+                        reference:
+                            reference,
+
+                        status:
+                            "SUCCESS",
+
+                        transactionId:
+                            transaction.id ||
+                            existing.transactionId ||
+                            null,
+
+                        mpesaReceipt:
+                            transaction.mpesaReceipt ||
+                            transaction.providerRef ||
+                            null,
+
+                        callback:
+                            req.body,
+
+                        completedAt:
+                            new Date()
+                                .toISOString()
+                    }
                 );
 
-                return res.status(401).json({
-                    success: false,
-                    message: "Invalid webhook signature"
+                console.log(
+                    "CHATPESA: PAYMENT SUCCESS"
+                );
+
+                return res.json({
+                    success: true
                 });
             }
-        }
 
-        const event = req.body?.event;
+            if (
+                event ===
+                    "payment.failed" ||
+                status === "FAILED" ||
+                status === "CANCELLED"
+            ) {
 
-        const transaction =
-            req.body?.transaction || {};
+                const existing =
+                    payments.get(
+                        reference
+                    ) || {};
 
-        const reference =
-            transaction.reference ||
-            transaction.internalReference;
+                payments.set(
+                    reference,
+                    {
+                        ...existing,
 
-        const status = String(
-            transaction.status || ""
-        ).toUpperCase();
+                        reference:
+                            reference,
 
-        console.log(
-            "CALLBACK REFERENCE:",
-            reference
-        );
+                        status:
+                            "FAILED",
 
-        console.log(
-            "CALLBACK STATUS:",
-            status || event
-        );
+                        callback:
+                            req.body,
 
-        if (!reference) {
-            return res.status(400).json({
+                        failedAt:
+                            new Date()
+                                .toISOString()
+                    }
+                );
+
+                console.log(
+                    "CHATPESA: PAYMENT FAILED"
+                );
+
+                return res.json({
+                    success: true
+                });
+            }
+
+            const existing =
+                payments.get(
+                    reference
+                ) || {};
+
+            payments.set(
+                reference,
+                {
+                    ...existing,
+
+                    reference:
+                        reference,
+
+                    status:
+                        status ||
+                        "PENDING",
+
+                    callback:
+                        req.body
+                }
+            );
+
+            return res.json({
+                success: true
+            });
+
+        } catch (error) {
+
+            console.error(
+                "PAYLOR CALLBACK ERROR:",
+                error
+            );
+
+            return res.status(500).json({
                 success: false,
-                message: "Payment reference missing"
+                message:
+                    "Callback processing failed"
             });
         }
-
-        if (
-            event === "payment.success" ||
-            status === "COMPLETED" ||
-            status === "SUCCESS"
-        ) {
-            const existing =
-                payments.get(reference) || {};
-
-            payments.set(reference, {
-                ...existing,
-                reference: reference,
-                status: "SUCCESS",
-                transactionId:
-                    transaction.id ||
-                    existing.transactionId ||
-                    null,
-                mpesaReceipt:
-                    transaction.mpesaReceipt ||
-                    transaction.providerRef ||
-                    null,
-                callback: req.body,
-                completedAt:
-                    new Date().toISOString()
-            });
-
-            console.log(
-                "CHATPESA: PAYMENT SUCCESS"
-            );
-
-            return res.json({
-                success: true
-            });
-        }
-
-        if (
-            event === "payment.failed" ||
-            status === "FAILED" ||
-            status === "CANCELLED"
-        ) {
-            const existing =
-                payments.get(reference) || {};
-
-            payments.set(reference, {
-                ...existing,
-                reference: reference,
-                status: "FAILED",
-                callback: req.body,
-                failedAt:
-                    new Date().toISOString()
-            });
-
-            console.log(
-                "CHATPESA: PAYMENT FAILED"
-            );
-
-            return res.json({
-                success: true
-            });
-        }
-
-        const existing =
-            payments.get(reference) || {};
-
-        payments.set(reference, {
-            ...existing,
-            reference: reference,
-            status: status || "PENDING",
-            callback: req.body
-        });
-
-        return res.json({
-            success: true
-        });
-
-    } catch (error) {
-        console.error(
-            "PAYLOR CALLBACK ERROR:",
-            error
-        );
-
-        return res.status(500).json({
-            success: false,
-            message: "Callback processing failed"
-        });
     }
-});
+);
 
 /* ================================
    PAYMENT STATUS
@@ -461,13 +610,17 @@ app.post("/paylor-callback", (req, res) => {
 app.get(
     "/payment-status/:reference",
     (req, res) => {
+
         const reference =
             req.params.reference;
 
         const payment =
-            payments.get(reference);
+            payments.get(
+                reference
+            );
 
         if (!payment) {
+
             return res.json({
                 success: false,
                 status: "NOT_FOUND"
@@ -476,12 +629,20 @@ app.get(
 
         return res.json({
             success: true,
-            reference: reference,
-            status: payment.status,
+
+            reference:
+                reference,
+
+            status:
+                payment.status,
+
             transactionId:
-                payment.transactionId || null,
+                payment.transactionId ||
+                null,
+
             mpesaReceipt:
-                payment.mpesaReceipt || null
+                payment.mpesaReceipt ||
+                null
         });
     }
 );
@@ -493,8 +654,13 @@ app.get(
 const PORT =
     process.env.PORT || 10000;
 
-app.listen(PORT, () => {
-    console.log(
-        "ChatPesa server running on port " + PORT
-    );
-});
+app.listen(
+    PORT,
+    () => {
+
+        console.log(
+            "ChatPesa server running on port " +
+            PORT
+        );
+    }
+);
