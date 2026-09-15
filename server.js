@@ -27,7 +27,7 @@ const payments = new Map();
 ================================ */
 
 const countryPrices = {
-    China: 1,
+    China: 350,
     Canada: 450,
     Australia: 550,
     UK: 650,
